@@ -1,0 +1,14 @@
+version: '3'
+
+volumes:
+  pg_data:
+
+
+services:
+  db:
+    image: postgres:16
+    env_file: ./src/.env
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    ports:
+      - '127.0.0.1:5432:5432'
