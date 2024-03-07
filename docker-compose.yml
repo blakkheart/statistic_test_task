@@ -5,10 +5,37 @@ volumes:
 
 
 services:
+
   db:
     image: postgres:16
     env_file: ./src/.env
     volumes:
       - pg_data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "sh -c pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 3s
+
+  test_db:
+    image: postgres:16
+    environment:
+      - DB_HOST=test_db
+      - DB_PORT=6000
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
+      - PGUSER=postgres
+    command: -p 6000
+
+
+  backend:
+    build: ./
+    env_file: ./src/.env
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
-      - '127.0.0.1:5432:5432'
+      - 127.0.0.1:8000:8000
