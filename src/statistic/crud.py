@@ -1,12 +1,13 @@
 from datetime import date
 from typing import List
 
-from fastapi import APIRouter, Query, Response, status
-from sqlalchemy import select, and_, case, Numeric, delete
+from fastapi import APIRouter, Depends, Query, Response, status
+from sqlalchemy import and_, case, delete, select, Numeric
 from sqlalchemy.sql import func
 from sqlalchemy.sql.expression import cast
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.database.db import async_session_factory
+from src.database.db import get_async_session
 from src.statistic.models import Statistic
 import src.statistic.schemas as schemas
 
@@ -14,63 +15,85 @@ import src.statistic.schemas as schemas
 router = APIRouter(tags=['statistic'])
 
 
-@router.get('/')
+@router.get('/', status_code=200)
 async def get_statistic(
-    from_: date = Query(..., alias='from'), to: date = Query(...)
+    session: AsyncSession = Depends(get_async_session),
+    from_: date = Query(..., alias='from'),
+    to: date = Query(...),
+    sort_by: str = 'date',
 ) -> List[schemas.StatisticRead]:
-    async with async_session_factory() as session:
-        query = (
-            select(
-                Statistic.date,
-                func.sum(Statistic.views).label('views'),
-                func.sum(Statistic.clicks).label('clicks'),
-                func.round(func.avg(cast(Statistic.cost, Numeric)), 2).label('cost'),
-                case(
-                    (
-                        func.sum(Statistic.clicks) > 0,
-                        func.round(
-                            cast((func.avg(Statistic.cost) / func.sum(Statistic.clicks)), Numeric),
-                            2,
+    """Получение статистики.
+    Принимает search параметры дату from и дату to, а также опциональный
+    параметр sort_by, позволяющий сортировать данные."""
+
+    query = (
+        select(
+            Statistic.date.label('date'),
+            func.sum(Statistic.views).label('views'),
+            func.sum(Statistic.clicks).label('clicks'),
+            func.round(func.avg(cast(Statistic.cost, Numeric)), 2).label('cost'),
+            case(
+                (
+                    func.sum(Statistic.clicks) > 0,
+                    func.round(
+                        cast(
+                            (func.avg(Statistic.cost) / func.sum(Statistic.clicks)),
+                            Numeric,
                         ),
+                        2,
                     ),
-                    else_=0,
-                ).label('cps'),
-                case(
-                    (
-                        func.sum(Statistic.views) > 0,
-                        func.round(
-                            cast((func.avg(Statistic.cost) / func.sum(Statistic.views)), Numeric),
-                            2,
+                ),
+                else_=0,
+            ).label('cps'),
+            case(
+                (
+                    func.sum(Statistic.views) > 0,
+                    func.round(
+                        cast(
+                            (
+                                func.avg(Statistic.cost)
+                                / (func.sum(Statistic.views) * 1000)
+                            ),
+                            Numeric,
                         ),
+                        2,
                     ),
-                    else_=0,
-                ).label('cpm'),
-            )
-            .where(and_(Statistic.date >= from_, Statistic.date <= to))
-            .group_by(
-                Statistic.date,
-            )
-            .order_by(Statistic.date)
+                ),
+                else_=0,
+            ).label('cpm'),
         )
-        result = await session.execute(query)
-        statistics = list(result.mappings())
-        return statistics
+        .where(and_(Statistic.date >= from_, Statistic.date <= to))
+        .group_by(
+            Statistic.date,
+        )
+        .order_by(sort_by)
+    )
+    result = await session.execute(query)
+    statistics = list(result.mappings())
+    return statistics
 
 
-@router.post('/')
-async def post_statistic(statistic: schemas.StatisticCreate) -> schemas.Statistic:
-    async with async_session_factory() as session:
-        db_statistic = Statistic(**statistic.model_dump())
-        session.add(db_statistic)
-        await session.commit()
-        await session.refresh(db_statistic)
-        return db_statistic
+@router.post('/', status_code=201)
+async def post_statistic(
+    statistic: schemas.StatisticCreate,
+    session: AsyncSession = Depends(get_async_session),
+) -> schemas.Statistic:
+    """Сохранение статистики."""
+
+    db_statistic = Statistic(**statistic.model_dump())
+    session.add(db_statistic)
+    await session.commit()
+    await session.refresh(db_statistic)
+    return db_statistic
 
 
-@router.delete('/')
-async def delete_statistic() -> Response:
-    async with async_session_factory() as session:
-        query = delete(Statistic)
-        await session.execute(query)
-        await session.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
+@router.delete('/', status_code=204)
+async def delete_statistic(
+    session: AsyncSession = Depends(get_async_session),
+) -> Response:
+    """Удаление статистики."""
+
+    query = delete(Statistic)
+    await session.execute(query)
+    await session.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

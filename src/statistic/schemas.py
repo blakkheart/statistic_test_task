@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict
 
 
 class StatisticCreate(BaseModel):
@@ -12,14 +12,13 @@ class StatisticCreate(BaseModel):
 
 
 class Statistic(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     date: date
     views: Optional[int] = None
     clicks: Optional[int] = None
     cost: Optional[float] = None
-
-    class Config:
-        orm_model = True
 
 
 class StatisticRead(BaseModel):
